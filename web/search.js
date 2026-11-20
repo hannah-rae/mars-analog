@@ -1,0 +1,97 @@
+// Query-by-example similarity over quantised PCA'd DINOv3 tokens.
+//
+// Each token is stored as k uint8 codes; dequantised value is
+//   x_j = vmin_j + code_j * step_j,   step_j = (vmax_j - vmin_j) / 255
+// For a query direction q the cosine is
+//   cos = (sum_j q_j x_j) / |x| = (bias + sum_j w_j code_j) / |x|
+// with w_j = q_j * step_j and bias = sum_j q_j vmin_j. Positive and negative
+// queries combine linearly (cos(x, qp) - cos(x, qn)), so one pass suffices.
+
+export class EmbeddingGrid {
+  constructor(meta, codes, validBits) {
+    this.meta = meta;
+    this.codes = codes;
+    this.k = meta.pca.n_components;
+    this.w = meta.grid.width;
+    this.h = meta.grid.height;
+    this.n = this.w * this.h;
+    this.vmin = Float32Array.from(meta.pca.vmin);
+    this.step = Float32Array.from(meta.pca.vmax.map((v, j) => (v - meta.pca.vmin[j]) / 255));
+    this.valid = new Uint8Array(this.n);
+    for (let i = 0; i < this.n; i++) this.valid[i] = (validBits[i >> 3] >> (7 - (i & 7))) & 1;
+    this.invNorm = new Float32Array(this.n);
+    const { k, vmin, step } = this;
+    for (let i = 0, b = 0; i < this.n; i++, b += k) {
+      let s = 0;
+      for (let j = 0; j < k; j++) { const x = vmin[j] + codes[b + j] * step[j]; s += x * x; }
+      this.invNorm[i] = s > 0 ? 1 / Math.sqrt(s) : 0;
+    }
+  }
+
+  /** unit-length dequantised vector for token i */
+  vector(i) {
+    const v = new Float32Array(this.k);
+    const b = i * this.k;
+    for (let j = 0; j < this.k; j++) v[j] = (this.vmin[j] + this.codes[b + j] * this.step[j]) * this.invNorm[i];
+    return v;
+  }
+
+  /** normalised mean of the unit vectors of the given token indices */
+  meanVector(indices) {
+    if (!indices.length) return null;
+    const m = new Float32Array(this.k);
+    for (const i of indices) { const v = this.vector(i); for (let j = 0; j < this.k; j++) m[j] += v[j]; }
+    let s = 0; for (let j = 0; j < this.k; j++) s += m[j] * m[j];
+    s = 1 / Math.sqrt(s || 1);
+    for (let j = 0; j < this.k; j++) m[j] *= s;
+    return m;
+  }
+
+  /** score = cos(x, mean(pos)) - cos(x, mean(neg)); NaN where invalid */
+  score(pos, neg) {
+    const qp = this.meanVector(pos), qn = this.meanVector(neg);
+    const { k, n, codes, invNorm, valid, vmin, step } = this;
+    const w = new Float32Array(k);
+    let bias = 0;
+    for (let j = 0; j < k; j++) {
+      const q = (qp ? qp[j] : 0) - (qn ? qn[j] : 0);
+      w[j] = q * step[j];
+      bias += q * vmin[j];
+    }
+    const out = new Float32Array(n);
+    for (let i = 0, b = 0; i < n; i++, b += k) {
+      if (!valid[i]) { out[i] = NaN; continue; }
+      let s = bias;
+      for (let j = 0; j < k; j++) s += w[j] * codes[b + j];
+      out[i] = s * invNorm[i];
+    }
+    return out;
+  }
+}
+
+/** approximate quantiles from a strided sample */
+export function quantiles(arr, qs, sampleSize = 100000) {
+  const stride = Math.max(1, Math.floor(arr.length / sampleSize));
+  const s = [];
+  for (let i = 0; i < arr.length; i += stride) if (!Number.isNaN(arr[i])) s.push(arr[i]);
+  s.sort((a, b) => a - b);
+  return qs.map(q => s[Math.min(s.length - 1, Math.floor(q * (s.length - 1)))]);
+}
+
+/** greedy non-maximum suppression on a w x h grid of scores (NaN ignored) */
+export function findPeaks(vals, w, h, { count = 10, minValue = 0.5, spacing = 8, exclude = [] } = {}) {
+  const cand = [];
+  for (let i = 0; i < vals.length; i++) if (vals[i] >= minValue) cand.push(i);
+  cand.sort((a, b) => vals[b] - vals[a]);
+  const taken = exclude.map(i => [i % w, Math.floor(i / w)]);
+  const peaks = [];
+  const s2 = spacing * spacing;
+  for (const i of cand) {
+    const x = i % w, y = Math.floor(i / w);
+    if (taken.some(([tx, ty]) => (tx - x) ** 2 + (ty - y) ** 2 < s2)) continue;
+    taken.push([x, y]);
+    peaks.push({ index: i, x, y, value: vals[i] });
+    if (peaks.length >= count) break;
+  }
+  return peaks;
+}

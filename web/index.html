@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mars Analog · Jezero</title>
+  <meta name="description" content="Search a Mars CTX image of Jezero Crater by example using DINOv3 patch embeddings, entirely in the browser.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.2.1/ol.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <aside id="panel">
+    <header>
+      <h1>Mars Analog <span class="sub">Jezero Crater</span></h1>
+      <p class="lede">Click anything on the CTX image. DINOv3 finds every place that looks like it.</p>
+    </header>
+
+    <section class="card">
+      <div class="row space">
+        <h2>Query</h2>
+        <button id="clear" class="ghost" title="Clear examples (Esc)">Clear</button>
+      </div>
+      <p class="hint"><kbd>Click</kbd> add a positive example · <kbd>Shift</kbd>+<kbd>Click</kbd> add a negative</p>
+      <ul id="examples"></ul>
+      <div id="presets"></div>
+    </section>
+
+    <section class="card">
+      <div class="row space">
+        <h2>Top matches</h2>
+        <label class="switch"><input type="checkbox" id="showPeaks" checked><span></span></label>
+      </div>
+      <ol id="peaks"><li class="empty">Add an example to search.</li></ol>
+    </section>
+
+    <section class="card">
+      <h2>Display</h2>
+      <label class="slider">Threshold <output id="thrVal">0.50</output>
+        <input type="range" id="threshold" min="0" max="0.99" step="0.01" value="0.5"></label>
+      <label class="slider">Opacity <output id="opVal">0.80</output>
+        <input type="range" id="opacity" min="0" max="1" step="0.05" value="0.8"></label>
+      <div class="seg" role="radiogroup" aria-label="Layer">
+        <button data-view="heat" class="on">Heatmap</button>
+        <button data-view="pca">PCA features</button>
+        <button data-view="none">Image only</button>
+      </div>
+      <div id="legend"><canvas id="legendCanvas" width="256" height="1"></canvas>
+        <div class="row space mono small"><span id="legLo">less similar</span><span id="legHi">more similar</span></div></div>
+      <label class="row small"><input type="checkbox" id="showLanding" checked> Perseverance landing site</label>
+      <label class="row small" id="datasetRow" hidden>Embeddings <select id="dataset"></select></label>
+    </section>
+
+    <footer class="small">
+      <div id="status" class="mono">Loading…</div>
+      <div id="readout" class="mono"></div>
+      <p>Imagery: MRO CTX orthomosaic (NASA/JPL/MSSS, USGS Astrogeology).
+         Features: Meta DINOv3. Inspired by <a href="https://calebrob.com/dinosats/" target="_blank" rel="noopener">DINO-Sats</a>.
+         <a href="https://github.com/hannah-rae/mars-analog" id="repoLink" target="_blank" rel="noopener">Source</a></p>
+    </footer>
+  </aside>
+
+  <div id="progress"><div id="progressBar"></div></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/ol@10.2.1/dist/ol.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
