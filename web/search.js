@@ -109,6 +109,100 @@ export function backgroundLSE(grid, bgPhrases, scale) {
   return lse;
 }
 
+/** normalised sum of unit vectors (null if none) */
+export function combine(vectors) {
+  if (!vectors.length) return null;
+  const m = new Float32Array(vectors[0].length);
+  for (const v of vectors) for (let j = 0; j < m.length; j++) m[j] += v[j];
+  let s = 0; for (let j = 0; j < m.length; j++) s += m[j] * m[j];
+  s = 1 / Math.sqrt(s || 1);
+  for (let j = 0; j < m.length; j++) m[j] *= s;
+  return m;
+}
+
+/** a_i = u_i . d for every token (u_i = unit token vector); 0 where invalid */
+EmbeddingGrid.prototype.dirDot = function (d, out = new Float32Array(this.n)) {
+  const { k, n, codes, invNorm, valid, vmin, step } = this;
+  const w = new Float32Array(k);
+  let bias = 0;
+  for (let j = 0; j < k; j++) { w[j] = d[j] * step[j]; bias += d[j] * vmin[j]; }
+  for (let i = 0, b = 0; i < n; i++, b += k) {
+    if (!valid[i]) { out[i] = 0; continue; }
+    let s = bias;
+    for (let j = 0; j < k; j++) s += w[j] * codes[b + j];
+    out[i] = s * invNorm[i];
+  }
+  return out;
+};
+
+/**
+ * Centred box sums of a W x H field over bw x bh windows, clipped at the edges.
+ * Window for cell (r, c) spans rows r-top..r-top+bh-1 and cols c-left..c-left+bw-1,
+ * with top = floor((bh-1)/2), left = floor((bw-1)/2).
+ */
+export function boxSum(src, W, H, bw, bh, out = new Float32Array(W * H), tmp = new Float32Array(W * H)) {
+  const left = (bw - 1) >> 1, right = bw - 1 - left, top = (bh - 1) >> 1, bottom = bh - 1 - top;
+  for (let r = 0; r < H; r++) {          // horizontal running sums
+    const o = r * W;
+    let s = 0;
+    for (let c = 0; c <= Math.min(right, W - 1); c++) s += src[o + c];
+    for (let c = 0; c < W; c++) {
+      tmp[o + c] = s;
+      const add = c + right + 1, sub = c - left;
+      if (add < W) s += src[o + add];
+      if (sub >= 0) s -= src[o + sub];
+    }
+  }
+  const acc = new Float64Array(W);       // vertical running sums
+  for (let r = 0; r <= Math.min(bottom, H - 1); r++) for (let c = 0; c < W; c++) acc[c] += tmp[r * W + c];
+  for (let r = 0; r < H; r++) {
+    const o = r * W, add = (r + bottom + 1) * W, sub = (r - top) * W;
+    for (let c = 0; c < W; c++) {
+      out[o + c] = acc[c];
+      if (r + bottom + 1 < H) acc[c] += tmp[add + c];
+      if (r - top >= 0) acc[c] -= tmp[sub + c];
+    }
+  }
+  return out;
+}
+
+/** |sum of unit token vectors| over every bw x bh window (cached per size) */
+EmbeddingGrid.prototype.windowNorms = function (bw, bh) {
+  this._normCache ??= new Map();
+  const key = `${bw}x${bh}`;
+  if (this._normCache.has(key)) return this._normCache.get(key);
+  const { k, n, w: W, h: H, codes, invNorm, valid, vmin, step } = this;
+  const f = new Float32Array(n), s = new Float32Array(n), tmp = new Float32Array(n), sq = new Float32Array(n);
+  for (let j = 0; j < k; j++) {
+    for (let i = 0; i < n; i++) f[i] = valid[i] ? (vmin[j] + codes[i * k + j] * step[j]) * invNorm[i] : 0;
+    boxSum(f, W, H, bw, bh, s, tmp);
+    for (let i = 0; i < n; i++) sq[i] += s[i] * s[i];
+  }
+  for (let i = 0; i < n; i++) sq[i] = Math.sqrt(sq[i]);
+  if (this._normCache.size > 4) this._normCache.clear();
+  this._normCache.set(key, sq);
+  return sq;
+};
+
+/**
+ * Region score for every window position (value stored at the window's centre cell):
+ *   cos(mean of window tokens, qp) - cos(mean of window tokens, qn)
+ * = (sum_window u) . (qp - qn) / |sum_window u|
+ * With bw = bh = 1 this is the per-token score.
+ */
+EmbeddingGrid.prototype.windowScore = function (qp, qn, bw, bh) {
+  const d = new Float32Array(this.k);
+  for (let j = 0; j < this.k; j++) d[j] = (qp ? qp[j] : 0) - (qn ? qn[j] : 0);
+  const a = this.dirDot(d);
+  const out = (bw === 1 && bh === 1) ? a : boxSum(a, this.w, this.h, bw, bh);
+  const norms = (bw === 1 && bh === 1) ? null : this.windowNorms(bw, bh);
+  for (let i = 0; i < this.n; i++) {
+    if (!this.valid[i]) { out[i] = NaN; continue; }
+    if (norms) out[i] = norms[i] > 0 ? out[i] / norms[i] : NaN;
+  }
+  return out;
+};
+
 /** approximate quantiles from a strided sample */
 export function quantiles(arr, qs, sampleSize = 100000) {
   const stride = Math.max(1, Math.floor(arr.length / sampleSize));

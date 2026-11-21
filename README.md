@@ -33,7 +33,19 @@ imagery with DINOv3 and dino.txt.
    fold into a single 64-term dot product per token (see
    [`web/search.js`](web/search.js)), so a full-scene query takes tens of
    milliseconds in plain JavaScript.
-5. **Text search.** Phrases from [`scripts/vocab_mars.txt`](scripts/vocab_mars.txt)
+5. **Region search.** Draw a box or polygon around an object (say, a
+   crater) and its tokens are averaged into one query vector. A window of
+   the same size then slides over the whole scene, and each position is
+   scored by the cosine between the window's mean embedding and the query:
+   `(Σ_window u) · (q⁺ − q⁻) / |Σ_window u|`, where `u` are unit token
+   vectors. The numerator is a box filter of a per-token dot product, and the
+   denominator needs 64 box filters (one per PCA component, cached per
+   window size), so a full-scene region search takes about half a second.
+   Matches are drawn as boxes of the same size, so it finds whole objects of
+   a similar size rather than tokens with similar texture. A clicked point is
+   the special case of a 1 × 1 window. Mean pooling ignores spatial layout
+   within the window, which suits roughly round objects like craters.
+6. **Text search.** Phrases from [`scripts/vocab_mars.txt`](scripts/vocab_mars.txt)
    are embedded ahead of time with the dino.txt text encoder, averaged over
    four prompt templates ("a satellite image of {}", …), and projected into
    the scene's PCA space ([`scripts/embed_vocab.py`](scripts/embed_vocab.py)),
@@ -41,7 +53,7 @@ imagery with DINOv3 and dino.txt.
    relative to a set of background prompts ("the surface of Mars", "rocky
    terrain", …): `P = 1 / (1 + exp(logsumexp_bg(100·cos) − 100·cos_query))`.
    **Alt+click** shows which phrases best match a spot.
-6. **Display.** Inferno colormap, threshold and opacity sliders, and a list
+7. **Display.** Inferno colormap, threshold and opacity sliders, and a list
    of the top 10 matches (greedy peak picking, at least 250 m apart).
 
 ### How well does text search work on Mars?
@@ -97,8 +109,12 @@ backbone) for click-only search; `--factor` sets the upsampling (token size =
 `web/config.json` (with `"text": true` if it has a `vocab.json`) and the UI
 shows a dropdown to switch between embedding sets.
 
-Controls: type or pick a phrase to search by text. **Click** adds a positive
-example, **Shift+click** a negative, **Alt+click** shows matching phrases,
+Controls: type or pick a phrase to search by text. Choose a selection tool
+under **Search by example**: **Point** (P), **Box** (B) or **Polygon** (O).
+With Point, **click** adds a positive example and **Shift+click** a negative.
+With Box, click two corners; with Polygon, click vertices and double-click to
+finish (hold **Shift** while finishing a shape to make it a negative).
+**Alt+click** shows matching phrases,
 **Esc** clears, **Space** toggles the heatmap, **G** toggles the token grid. With the grid on, the cell under the cursor (the exact 32 m token a click selects) is outlined, grid lines appear once cells are big enough on screen, and selected examples are drawn as their cells. The query is saved in the URL
 hash, so you can share a link to a search.
 

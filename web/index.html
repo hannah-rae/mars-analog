@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@10.2.1/ol.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
   <div id="map"></div>
@@ -36,10 +36,15 @@
 
     <section class="card">
       <div class="row space">
-        <h2>Click search</h2>
+        <h2>Search by example</h2>
         <button id="clear" class="ghost" title="Clear examples (Esc)">Clear</button>
       </div>
-      <p class="hint"><kbd>Click</kbd> add a positive example · <kbd>Shift</kbd>+<kbd>Click</kbd> add a negative</p>
+      <div class="seg" id="tools" role="radiogroup" aria-label="Selection tool">
+        <button data-tool="point" class="on" title="Select one token (P)">Point</button>
+        <button data-tool="box" title="Draw a rectangle (B)">Box</button>
+        <button data-tool="polygon" title="Draw a polygon (O)">Polygon</button>
+      </div>
+      <p class="hint" id="toolHint"></p>
       <ul id="examples"></ul>
       <div id="presets"></div>
     </section>
@@ -82,6 +87,6 @@
   <div id="progress"><div id="progressBar"></div></div>
 
   <script src="https://cdn.jsdelivr.net/npm/ol@10.2.1/dist/ol.js"></script>
-  <script type="module" src="app.js"></script>
+  <script type="module" src="app.js?v=4"></script>
 </body>
 </html>
