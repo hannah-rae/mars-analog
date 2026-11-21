@@ -64,6 +64,48 @@ testing, "sand dunes" finds the rippled sand on the floor of the inlet
 channel, and "impact crater" finds craters. Terms like "river delta" barely
 register. Click search is more reliable for specific features.
 
+## Global search (Mars THEMIS, Moon WAC)
+
+[`web/global/`](web/global/) searches whole planets with **one embedding per
+~22 km chip** instead of one per 32 m token: Mars at `global/` (THEMIS Day IR
+100 m global mosaic) and the Moon at `global/?body=moon` (LROC WAC 100 m
+global mosaic).
+
+- **Chips** ([`scripts/embed_chips.py`](scripts/embed_chips.py)): latitude
+  bands 224 px (22.4 km) tall, stepped by 150 px (15 km). Within a band, chips
+  are 224 / cos(latitude) px wide, so every chip covers roughly the same
+  ground area, and they wrap at 360°. Each chip is area-resampled to 224 × 224
+  and embedded with the dino.txt *image-level* embedding (head CLS + mean of
+  head patch tokens, 2048-d), which is what dino.txt aligns with text. The run
+  is checkpointed after every band, so it can be resumed.
+- **Compression**: 64 PCA components quantized to uint8, 64 bytes per chip.
+  About 645k chips for Mars, about 41 MB in the browser.
+  [`experiments/chip_compression.py`](experiments/chip_compression.py)
+  compares PCA, product quantization and binary codes on Jezero chips:
+  PCA-64 keeps about 85% of the full-precision top-10 neighbours, and 100% of
+  them are within the compressed top 100, so a re-ranking stage would recover
+  exact results.
+- **Text search** uses the full 2048-d dino.txt text embedding
+  (`embed_vocab.py --image_level`) with per-body vocabularies
+  ([`vocab_mars.txt`](scripts/vocab_mars.txt),
+  [`vocab_moon.txt`](scripts/vocab_moon.txt)).
+- **Viewer**: the heatmap is a 4096 × 2048 global raster. Each pixel shows the
+  chip whose centre is nearest, computed directly from the band layout, so no
+  lookup table is downloaded. Background tiles come from NASA Mars Trek and
+  Moon Trek when zoomed in, over a low-resolution global overview.
+
+```bash
+curl -L -o data/themis_dayir_100m_v12.tif \
+  https://planetarymaps.usgs.gov/mosaic/Mars_MO_THEMIS-IR-Day_mosaic_global_100m_v12.tif   # 22.8 GB
+.venv/bin/python scripts/embed_chips.py                       # ~1.8 h on an M5 Pro (MPS)
+.venv/bin/python scripts/embed_vocab.py --name themis --image_level
+
+curl -L -o data/lroc_wac_global_100m.tif \
+  https://planetarymaps.usgs.gov/mosaic/Lunar_LRO_LROC-WAC_Mosaic_global_100m_June2013.tif  # 6.0 GB
+.venv/bin/python scripts/embed_chips.py --input data/lroc_wac_global_100m.tif --name wac --body Moon
+.venv/bin/python scripts/embed_vocab.py --name wac --image_level --vocab scripts/vocab_moon.txt
+```
+
 ## How this differs from DINO-Sats
 
 - Text search uses a fixed, precomputed vocabulary (about 120 Mars phrases)

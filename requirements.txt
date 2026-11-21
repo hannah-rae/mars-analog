@@ -8,3 +8,5 @@ torchvision
 omegaconf
 ftfy
 regex
+# experiments/chip_compression.py only:
+# faiss-cpu

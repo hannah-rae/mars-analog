@@ -1,0 +1,194 @@
+{
+ "throughput_chips_per_s": {
+  "224": 102.66313537849736,
+  "448": 25.045421267932074
+ },
+ "n_chips": 6080,
+ "n_queries": 600,
+ "methods": {
+  "backbone CLS (1024-d)": [
+   {
+    "method": "fp16",
+    "bytes": 2048,
+    "recall10": 1.0,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "int8 scalar",
+    "bytes": 1024,
+    "recall10": 0.9965000000000002,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "PCA-256 + uint8",
+    "bytes": 256,
+    "recall10": 0.9565,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "PCA-128 + uint8",
+    "bytes": 128,
+    "recall10": 0.9138333333333333,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "PCA-64 + uint8",
+    "bytes": 64,
+    "recall10": 0.8496666666666667,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "PCA-32 + uint8",
+    "bytes": 32,
+    "recall10": 0.7285,
+    "recall10_at100": 0.9996666666666666
+   },
+   {
+    "method": "PCA-16 + uint8",
+    "bytes": 16,
+    "recall10": 0.5476666666666667,
+    "recall10_at100": 0.9933333333333333
+   },
+   {
+    "method": "binary 1024 bits (PCA+rot sign)",
+    "bytes": 128,
+    "recall10": 0.7233333333333334,
+    "recall10_at100": 0.9995
+   },
+   {
+    "method": "binary 512 bits (PCA+rot sign)",
+    "bytes": 64,
+    "recall10": 0.635,
+    "recall10_at100": 0.9963333333333333
+   },
+   {
+    "method": "binary 256 bits (PCA+rot sign)",
+    "bytes": 32,
+    "recall10": 0.5235000000000001,
+    "recall10_at100": 0.9756666666666668
+   },
+   {
+    "method": "binary 128 bits (PCA+rot sign)",
+    "bytes": 16,
+    "recall10": 0.4166666666666667,
+    "recall10_at100": 0.9278333333333332
+   },
+   {
+    "method": "OPQ+PQ 64 bytes",
+    "bytes": 64,
+    "recall10": 0.797,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "OPQ+PQ 32 bytes",
+    "bytes": 32,
+    "recall10": 0.69,
+    "recall10_at100": 0.9988333333333335
+   },
+   {
+    "method": "OPQ+PQ 16 bytes",
+    "bytes": 16,
+    "recall10": 0.5585,
+    "recall10_at100": 0.98
+   },
+   {
+    "method": "OPQ+PQ 8 bytes",
+    "bytes": 8,
+    "recall10": 0.4303333333333334,
+    "recall10_at100": 0.9309999999999998
+   }
+  ],
+  "dino.txt image emb (2048-d)": [
+   {
+    "method": "fp16",
+    "bytes": 4096,
+    "recall10": 0.9998333333333332,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "int8 scalar",
+    "bytes": 2048,
+    "recall10": 0.9968333333333331,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "PCA-256 + uint8",
+    "bytes": 256,
+    "recall10": 0.9631666666666668,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "PCA-128 + uint8",
+    "bytes": 128,
+    "recall10": 0.9195000000000001,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "PCA-64 + uint8",
+    "bytes": 64,
+    "recall10": 0.8565000000000002,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "PCA-32 + uint8",
+    "bytes": 32,
+    "recall10": 0.7343333333333333,
+    "recall10_at100": 0.9996666666666666
+   },
+   {
+    "method": "PCA-16 + uint8",
+    "bytes": 16,
+    "recall10": 0.555,
+    "recall10_at100": 0.9941666666666666
+   },
+   {
+    "method": "binary 1024 bits (PCA+rot sign)",
+    "bytes": 128,
+    "recall10": 0.7126666666666667,
+    "recall10_at100": 0.9998333333333332
+   },
+   {
+    "method": "binary 512 bits (PCA+rot sign)",
+    "bytes": 64,
+    "recall10": 0.6255000000000001,
+    "recall10_at100": 0.9963333333333333
+   },
+   {
+    "method": "binary 256 bits (PCA+rot sign)",
+    "bytes": 32,
+    "recall10": 0.5261666666666668,
+    "recall10_at100": 0.9771666666666667
+   },
+   {
+    "method": "binary 128 bits (PCA+rot sign)",
+    "bytes": 16,
+    "recall10": 0.412,
+    "recall10_at100": 0.9258333333333333
+   },
+   {
+    "method": "OPQ+PQ 64 bytes",
+    "bytes": 64,
+    "recall10": 0.76,
+    "recall10_at100": 1.0
+   },
+   {
+    "method": "OPQ+PQ 32 bytes",
+    "bytes": 32,
+    "recall10": 0.6376666666666667,
+    "recall10_at100": 0.9955000000000002
+   },
+   {
+    "method": "OPQ+PQ 16 bytes",
+    "bytes": 16,
+    "recall10": 0.5058333333333334,
+    "recall10_at100": 0.9720000000000001
+   },
+   {
+    "method": "OPQ+PQ 8 bytes",
+    "bytes": 8,
+    "recall10": 0.41633333333333333,
+    "recall10_at100": 0.9239999999999999
+   }
+  ]
+ }
+}

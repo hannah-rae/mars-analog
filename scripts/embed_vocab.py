@@ -22,6 +22,7 @@ p.add_argument("--out_dir", default="web/data")
 p.add_argument("--pca_dir", default="data")
 p.add_argument("--weights_dir", default="weights")
 p.add_argument("--dinov3_repo", default="../third_party/dinov3")
+p.add_argument("--image_level", action="store_true", help="use full 2048-d text embeddings (for chip / image-level embeddings)")
 p.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
 args = p.parse_args()
 
@@ -41,7 +42,7 @@ mu, C = pca["mean"], pca["components"]  # (D,), (k, D)
 
 model, tok = load_dinotxt(args.weights_dir, args.dinov3_repo)
 model.to(args.device)
-T = text_embeddings(model, tok, allp, torch.device(args.device)).numpy()  # (N, D)
+T = text_embeddings(model, tok, allp, torch.device(args.device), patch_aligned=not args.image_level).numpy()  # (N, D)
 logit_scale = float(model.logit_scale.exp())
 
 entries = [{"text": t, "q": np.round(C @ v, 5).tolist(), "b": round(float(v @ mu), 6)} for t, v in zip(allp, T)]

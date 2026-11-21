@@ -69,16 +69,30 @@ def load_dinotxt(weights_dir="weights", dinov3_repo="../third_party/dinov3", ver
 
 
 @torch.no_grad()
-def text_embeddings(model, tokenizer, phrases, device, templates=TEMPLATES):
-    """Patch-aligned text embedding per phrase: prompt-ensembled, unit length (N, 1024)."""
+def text_embeddings(model, tokenizer, phrases, device, templates=TEMPLATES, patch_aligned=True):
+    """Prompt-ensembled unit text embedding per phrase.
+
+    patch_aligned=True: 2nd half (N, 1024), aligned with dino.txt patch tokens.
+    patch_aligned=False: full (N, 2048), aligned with image-level embeddings (head CLS + mean patch).
+    """
     out = []
     for phrase in phrases:
         tokens = tokenizer.tokenize([t.format(phrase) for t in templates]).to(device)
         f = model.encode_text(tokens).float()
-        f = f[:, f.shape[1] // 2:]  # 2nd half aligns with patch tokens
+        if patch_aligned:
+            f = f[:, f.shape[1] // 2:]  # 2nd half aligns with patch tokens
         f = F.normalize(f, dim=-1).mean(0)
         out.append(F.normalize(f, dim=-1))
     return torch.stack(out).cpu()
+
+
+@torch.no_grad()
+def image_embeddings(model, images):
+    """dino.txt image-level embedding (B, 2048) = [head CLS, mean of head patch tokens], unnormalised."""
+    vm = model.visual_model
+    cls, patches, regs = vm.get_backbone_features(images)
+    tok = vm.head(torch.cat([cls.unsqueeze(1), regs, patches], dim=1))
+    return torch.cat([tok[:, 0], tok[:, regs.shape[1] + 1:].mean(1)], dim=1)
 
 
 @torch.no_grad()

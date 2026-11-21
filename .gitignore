@@ -6,3 +6,7 @@ embed.log
 .claude/
 /weights/
 embed_dinotxt.log
+embed_chips.log
+/data/chips/
+embed_chips_wac.log
+experiments/*.log
