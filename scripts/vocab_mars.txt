@@ -10,7 +10,6 @@ bg:the ground
 bg:a satellite image
 # --- landforms
 sand dunes
-sand ripples
 dark sand
 bright sand
 dune field
@@ -45,23 +44,12 @@ plateau
 hills
 knobs
 mounds
-buttes and mesas
 layered rock
-layered sedimentary rock
 sedimentary layers
 stratified cliffs
 eroded rock
 wind-eroded rock
 yardangs
-boulders
-boulder field
-rocks
-cobbles
-gravel
-sand
-sandstone
-clay
-mudstone
 lake bed
 dry lake
 an ancient lake
@@ -88,8 +76,6 @@ desert
 sand sea
 erosion
 sediment
-mud
-pebbles
 mountains
 highlands
 lowlands
@@ -99,29 +85,6 @@ pit
 trough
 dust devil tracks
 wind streaks
-tracks
 # --- everyday words people will try
-water
 ice
-snow
-a river
-a lake
-a road
-a building
-a city
-a field
-a forest
-a beach
-an ocean
-a rover
-a spacecraft
-a parachute
-a landing site
-a lunar surface
-the moon
-Earth
-a desert from above
-the Sahara
-a canyon from above
 a volcano
-a mountain range
