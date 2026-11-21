@@ -1,11 +1,14 @@
-# Mars Analog: search Jezero Crater with DINOv3
+# Mars Analog: search Mars and the Moon with DINOv3
 
-Search a Mars Reconnaissance Orbiter CTX image of Jezero Crater two ways:
-type a phrase such as "sand dunes" or "impact crater", or click a spot and see
-every other place in the scene that DINOv3 sees as similar. Everything runs in
-the browser: no server, no GPU at query time.
+**Live:** https://hannah-rae.github.io/mars-analog/ (Mars) ·
+[Moon](https://hannah-rae.github.io/mars-analog/?body=moon)
 
-This is a Mars version of Caleb Robinson's
+Search the whole surface of Mars (THEMIS daytime infrared) or the Moon (LROC
+WAC) two ways: type a phrase such as "sand dunes" or "impact crater", or click
+a spot and see every other place on the planet that DINOv3 sees as similar.
+Everything runs in the browser: no server, no GPU at query time.
+
+This started as a Mars version of Caleb Robinson's
 [DINO-Sats](https://calebrob.com/dinosats/)
 ([post](https://geospatialml.substack.com/p/searching-aerial-imagery-with-dinosats),
 [code](https://github.com/calebrob6/dinosats)), which searches NAIP aerial
@@ -13,120 +16,70 @@ imagery with DINOv3 and dino.txt.
 
 ## How it works
 
-1. **Imagery.** The USGS Mars 2020 Terrain Relative Navigation CTX
-   orthomosaic of Jezero (`JEZ_ctx_B_soc_008_orthoMosaic_6m`): 5322 × 5040
-   px at 6 m/px (about 32 × 30 km), single band, Mars 2000 equirectangular.
-2. **Features.** The image is upsampled 3× and run through DINOv3 ViT-L/16
-   (the standard web-image `lvd1689m` backbone) plus the
-   [dino.txt](https://arxiv.org/abs/2412.16334) vision head, whose patch
-   tokens are aligned with text. Each token covers 32 m on the ground (943k
-   tokens). Grayscale is copied to all three channels. The model runs over
-   1024 px windows at a 256 px stride, and the overlapping windows are
-   blended with a 2D Hann weight to remove window-edge artifacts.
-3. **Compression.** Tokens are L2-normalized and reduced to 64 PCA
-   components (85% of the variance). Each component is quantized to uint8
-   over its 0.05–99.95 percentile range, so each token takes 64 bytes and
-   the whole scene is about 60 MB.
-4. **Click search.** A query is the mean of the clicked tokens (positives)
-   minus the mean of the shift-clicked tokens (negatives). Every token is
-   scored with `cos(x, q⁺) − cos(x, q⁻)`. PCA projection and dequantization
-   fold into a single 64-term dot product per token (see
-   [`web/search.js`](web/search.js)), so a full-scene query takes tens of
-   milliseconds in plain JavaScript.
-5. **Region search.** Draw a box or polygon around an object (say, a
-   crater) and its tokens are averaged into one query vector. A window of
-   the same size then slides over the whole scene, and each position is
-   scored by the cosine between the window's mean embedding and the query:
-   `(Σ_window u) · (q⁺ − q⁻) / |Σ_window u|`, where `u` are unit token
-   vectors. The numerator is a box filter of a per-token dot product, and the
-   denominator needs 64 box filters (one per PCA component, cached per
-   window size), so a full-scene region search takes about half a second.
-   Matches are drawn as boxes of the same size, so it finds whole objects of
-   a similar size rather than tokens with similar texture. A clicked point is
-   the special case of a 1 × 1 window. Mean pooling ignores spatial layout
-   within the window, which suits roughly round objects like craters.
+1. **Imagery.** The USGS global mosaics at 100 m/px: THEMIS Day IR v12 for Mars
+   (213,390 × 106,696 px) and LROC WAC (June 2013) for the Moon
+   (109,164 × 54,582 px). Both are single-band, equirectangular.
+2. **Chips** ([`scripts/embed_chips.py`](scripts/embed_chips.py)). Latitude
+   bands 224 px (22.4 km) tall, stepped by 150 px (15 km). Within a band,
+   chips are 224 / cos(latitude) px wide, so every chip covers roughly the same
+   ground area, and they wrap at 360°. Each chip is area-resampled to
+   224 × 224. Chips that are mostly nodata or mostly shadow (the WAC mosaic is
+   largely in shadow above about 83°) are marked invalid. Mars has 644,631
+   chips and the Moon 168,781.
+3. **Features.** Each chip is embedded with DINOv3 ViT-L/16 (the standard
+   web-image `lvd1689m` backbone) plus the
+   [dino.txt](https://arxiv.org/abs/2412.16334) vision head. The embedding is
+   dino.txt's *image-level* vector (head CLS + mean of head patch tokens,
+   2048-d), which is the one aligned with text. Grayscale is copied to all
+   three channels. The run is checkpointed after every band, so it can be
+   resumed; Mars takes about 1.8 h and the Moon about 30 min on an M5 Pro
+   (MPS).
+4. **Compression.** Embeddings are reduced to 64 PCA components (84–86% of
+   the variance), and each component is quantized to uint8 over its
+   0.05–99.95 percentile range: 64 bytes per chip, 41 MB for Mars and 11 MB
+   for the Moon. [`experiments/chip_compression.py`](experiments/chip_compression.py)
+   compares PCA, product quantization and binary codes on 224 px chips of a
+   6 m CTX mosaic of Jezero Crater (an earlier version of this demo): PCA-64 keeps about
+   85% of the full-precision top-10 neighbours, and all of them are within
+   the compressed top 100, so a re-ranking stage could recover exact results.
+5. **Click search.** A query is the mean of the clicked chips (positives)
+   minus the mean of the shift-clicked chips (negatives). Every chip is scored
+   with `cos(x, q⁺) − cos(x, q⁻)`. PCA projection and dequantization fold into
+   a single 64-term dot product per chip (see [`web/search.js`](web/search.js)),
+   so a whole-planet query takes under 100 ms in plain JavaScript.
 6. **Text search.** Phrases from [`scripts/vocab_mars.txt`](scripts/vocab_mars.txt)
-   are embedded ahead of time with the dino.txt text encoder, averaged over
-   four prompt templates ("a satellite image of {}", …), and projected into
-   the scene's PCA space ([`scripts/embed_vocab.py`](scripts/embed_vocab.py)),
-   so the browser needs no text model. As in DINO-Sats, each token's score is
-   relative to a set of background prompts ("the surface of Mars", "rocky
-   terrain", …): `P = 1 / (1 + exp(logsumexp_bg(100·cos) − 100·cos_query))`.
-   **Alt+click** shows which phrases best match a spot.
-7. **Display.** Inferno colormap, threshold and opacity sliders, and a list
-   of the top 10 matches (greedy peak picking, at least 250 m apart).
+   and [`scripts/vocab_moon.txt`](scripts/vocab_moon.txt) are embedded ahead of
+   time with the dino.txt text encoder (full 2048-d), averaged over four prompt
+   templates ("a satellite image of {}", …), and projected into each body's
+   PCA space ([`scripts/embed_vocab.py`](scripts/embed_vocab.py)), so the
+   browser needs no text model. As in DINO-Sats, each chip's score is relative
+   to a set of background prompts ("the surface of Mars", "rocky terrain", …):
+   `P = 1 / (1 + exp(logsumexp_bg(100·cos) − 100·cos_query))`. The heatmap
+   stretches P between its median and 99.9th percentile. **Alt+click** shows
+   which phrases best match a chip.
+7. **Viewer** ([`web/app.js`](web/app.js), OpenLayers). The heatmap is a
+   4096 × 2048 global raster; each pixel shows the chip whose centre is
+   nearest, computed directly from the band layout, so no lookup table is
+   downloaded. The top 20 matches are picked greedily at least 1.5 chips apart
+   (great-circle distance). The **top-10 preview** panel shows each match as
+   the model saw it (the chip's lon/lat box resampled to a square), next to
+   the query. Background and preview imagery come from NASA
+   [Mars Trek](https://trek.nasa.gov/mars/) and [Moon Trek](https://trek.nasa.gov/moon/)
+   tiles over a low-resolution overview.
 
-### How well does text search work on Mars?
+### How well does text search work?
 
-dino.txt learned from web photos with captions, not grayscale orbital
-images, so expect broad terms to work and fine geologic units not to. In
-testing, "sand dunes" finds the rippled sand on the floor of the inlet
-channel, and "impact crater" finds craters. Terms like "river delta" barely
-register. Click search is more reliable for specific features.
-
-## Global search (Mars THEMIS, Moon WAC)
-
-[`web/global/`](web/global/) searches whole planets with **one embedding per
-~22 km chip** instead of one per 32 m token: Mars at `global/` (THEMIS Day IR
-100 m global mosaic) and the Moon at `global/?body=moon` (LROC WAC 100 m
-global mosaic).
-
-- **Chips** ([`scripts/embed_chips.py`](scripts/embed_chips.py)): latitude
-  bands 224 px (22.4 km) tall, stepped by 150 px (15 km). Within a band, chips
-  are 224 / cos(latitude) px wide, so every chip covers roughly the same
-  ground area, and they wrap at 360°. Each chip is area-resampled to 224 × 224
-  and embedded with the dino.txt *image-level* embedding (head CLS + mean of
-  head patch tokens, 2048-d), which is what dino.txt aligns with text. The run
-  is checkpointed after every band, so it can be resumed.
-- **Compression**: 64 PCA components quantized to uint8, 64 bytes per chip.
-  About 645k chips for Mars, about 41 MB in the browser.
-  [`experiments/chip_compression.py`](experiments/chip_compression.py)
-  compares PCA, product quantization and binary codes on Jezero chips:
-  PCA-64 keeps about 85% of the full-precision top-10 neighbours, and 100% of
-  them are within the compressed top 100, so a re-ranking stage would recover
-  exact results.
-- **Text search** uses the full 2048-d dino.txt text embedding
-  (`embed_vocab.py --image_level`) with per-body vocabularies
-  ([`vocab_mars.txt`](scripts/vocab_mars.txt),
-  [`vocab_moon.txt`](scripts/vocab_moon.txt)).
-- **Viewer**: the heatmap is a 4096 × 2048 global raster. Each pixel shows the
-  chip whose centre is nearest, computed directly from the band layout, so no
-  lookup table is downloaded. Background tiles come from NASA Mars Trek and
-  Moon Trek when zoomed in, over a low-resolution global overview.
-
-```bash
-curl -L -o data/themis_dayir_100m_v12.tif \
-  https://planetarymaps.usgs.gov/mosaic/Mars_MO_THEMIS-IR-Day_mosaic_global_100m_v12.tif   # 22.8 GB
-.venv/bin/python scripts/embed_chips.py                       # ~1.8 h on an M5 Pro (MPS)
-.venv/bin/python scripts/embed_vocab.py --name themis --image_level
-
-curl -L -o data/lroc_wac_global_100m.tif \
-  https://planetarymaps.usgs.gov/mosaic/Lunar_LRO_LROC-WAC_Mosaic_global_100m_June2013.tif  # 6.0 GB
-.venv/bin/python scripts/embed_chips.py --input data/lroc_wac_global_100m.tif --name wac --body Moon
-.venv/bin/python scripts/embed_vocab.py --name wac --image_level --vocab scripts/vocab_moon.txt
-```
-
-## How this differs from DINO-Sats
-
-- Text search uses a fixed, precomputed vocabulary (about 120 Mars phrases)
-  instead of running the text encoder in the browser.
-- Click search with positive and negative examples.
-- A single small scene, so embeddings ship as one flat binary file instead
-  of a multi-level COG.
-- A 3× upsample (32 m tokens) to suit 6 m CTX.
-- No positional-bias projection; Hann blending at stride W/4 handles most of
-  the window ripple.
+dino.txt learned from web photos with captions, not grayscale orbital images,
+so expect broad terms to work and fine geologic units not to. In testing,
+"sand dunes" finds the north polar erg on Mars and "canyon" finds Valles
+Marineris, while "impact crater" lights up much of both bodies (at 22 km,
+craters are everywhere). Click search is more reliable for specific features.
 
 ## Run it locally
 
 ```bash
 uv venv -p 3.12 .venv && uv pip install -p .venv -r requirements.txt
 git clone https://github.com/facebookresearch/dinov3.git ../third_party/dinov3
-
-# Imagery
-mkdir -p data
-curl -L -o data/jezero_ctx_6m.tif \
-  https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/mars2020_trn/CTX/JEZ_ctx_B_soc_008_orthoMosaic_6m_Eqc_latTs0_lon0.tif
 
 # DINOv3 + dino.txt weights (DINOv3 License). Official links come from Meta's
 # download form; this repo was built from a Hugging Face mirror of the same
@@ -137,44 +90,50 @@ for f in bpe_simple_vocab_16e6.txt.gz dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.p
          dinov3_vitl16_dinotxt_vision_head_and_text_encoder-a442d8f5.pth; do curl -LO $M/$f; done
 cd ..
 
-.venv/bin/python scripts/make_basemap.py
-.venv/bin/python scripts/embed.py --model dinotxt   # ~20 min on an Apple M-series GPU (MPS)
-.venv/bin/python scripts/embed_vocab.py             # text embeddings for the vocabulary
-python3 -m http.server -d web 8000                  # open http://localhost:8000
+# Mars
+mkdir -p data
+curl -L -o data/themis_dayir_100m_v12.tif \
+  https://planetarymaps.usgs.gov/mosaic/Mars_MO_THEMIS-IR-Day_mosaic_global_100m_v12.tif   # 22.8 GB
+.venv/bin/python scripts/embed_chips.py
+.venv/bin/python scripts/embed_vocab.py --name themis --image_level
+
+# Moon
+curl -L -o data/lroc_wac_global_100m.tif \
+  https://planetarymaps.usgs.gov/mosaic/Lunar_LRO_LROC-WAC_Mosaic_global_100m_June2013.tif  # 6.0 GB
+.venv/bin/python scripts/embed_chips.py --input data/lroc_wac_global_100m.tif --name wac --body Moon
+.venv/bin/python scripts/embed_vocab.py --name wac --image_level --vocab scripts/vocab_moon.txt
+
+python3 -m http.server -d web 8000   # open http://localhost:8000
 ```
 
-To add search phrases, edit `scripts/vocab_mars.txt` and re-run
-`embed_vocab.py`. `embed.py` also accepts any timm DINOv3 model (for
-example `--model vit_large_patch16_dinov3.sat493m`, the satellite-trained
-backbone) for click-only search; `--factor` sets the upsampling (token size =
-96 m / factor). Each run writes to `web/data/<name>/`; list it in
-`web/config.json` (with `"text": true` if it has a `vocab.json`) and the UI
-shows a dropdown to switch between embedding sets.
+Each run writes to `web/data/<name>/` and keeps its full-precision embeddings
+in `data/chips/<name>/`. To change which chips count as valid without
+re-running the model, pass `--revalidate` (with `--max_nodata`, `--dark_level`
+or `--max_dark`); it redoes PCA, so re-run `embed_vocab.py` afterwards. To add
+search phrases, edit the vocabulary file and re-run `embed_vocab.py`.
 
-Controls: type or pick a phrase to search by text. Choose a selection tool
-under **Search by example**: **Point** (P), **Box** (B) or **Polygon** (O).
-With Point, **click** adds a positive example and **Shift+click** a negative.
-With Box, click two corners; with Polygon, click vertices and double-click to
-finish (hold **Shift** while finishing a shape to make it a negative).
-**Alt+click** shows matching phrases,
-**Esc** clears, **Space** toggles the heatmap, **G** toggles the token grid. With the grid on, the cell under the cursor (the exact 32 m token a click selects) is outlined, grid lines appear once cells are big enough on screen, and selected examples are drawn as their cells. The query is saved in the URL
-hash, so you can share a link to a search.
+Controls: type or pick a phrase to search by text. **Click** a chip to add a
+positive example and **Shift+click** a negative. **Alt+click** shows matching
+phrases, **Esc** clears, **Space** toggles the heatmap. Click a match (in the
+list or the preview panel) to zoom to it. The query is saved in the URL hash,
+so you can share a link to a search.
 
 ## Deploy
 
 `.github/workflows/pages.yml` publishes `web/` to GitHub Pages on every push
-to `main`. The generated files in `web/data/` are about 65 MB in total, so
-they can be committed directly (each file is under GitHub's 100 MB limit).
+to `main`. The generated files in `web/data/` are about 70 MB in total, so
+they are committed directly (each file is under GitHub's 100 MB limit).
 
 ## Licenses
 
 - **Code:** MIT (see [LICENSE](LICENSE)).
 - **DINOv3 weights and everything derived from them**, including
-  `web/data/*/embeddings.u8`, `pca_rgb.png` and `vocab.json`: the
+  `web/data/*/embeddings.u8` and `vocab.json`: the
   [DINOv3 License](https://ai.meta.com/resources/models-and-libraries/dinov3-license/).
-- **CTX imagery:** NASA/JPL-Caltech/MSSS. The orthomosaic is from USGS
-  Astrogeology (Fergason et al., Mars 2020 TRN products). U.S. government
-  work, public domain.
+- **Imagery:** THEMIS Day IR global mosaic (NASA/JPL/ASU; USGS Astrogeology)
+  and LROC WAC global mosaic (NASA/GSFC/ASU; USGS Astrogeology), U.S.
+  government works in the public domain. Map tiles from NASA Mars Trek and
+  Moon Trek.
 - **OpenLayers** (BSD-2-Clause), loaded from jsDelivr.
 
 ## Acknowledgments

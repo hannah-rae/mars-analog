@@ -35,7 +35,11 @@ p.add_argument("--body", default="Mars")
 p.add_argument("--chip", type=int, default=224, help="chip height in source px")
 p.add_argument("--stride", type=int, default=150, help="band step in source px (chip widths step by the same fraction)")
 p.add_argument("--input_size", type=int, default=224, help="model input size in px")
-p.add_argument("--max_nodata", type=float, default=0.5)
+p.add_argument("--max_nodata", type=float, default=0.5, help="max fraction of nodata (0) pixels in a valid chip")
+p.add_argument("--dark_level", type=int, default=10, help="pixels below this count as shadow")
+p.add_argument("--max_dark", type=float, default=0.5, help="max fraction of shadow pixels in a valid chip (e.g. lunar poles)")
+p.add_argument("--revalidate", action="store_true",
+               help="recompute the valid mask from the raster (no model), then redo PCA and outputs")
 p.add_argument("--n_components", type=int, default=64)
 p.add_argument("--batch", type=int, default=64)
 p.add_argument("--work_dir", default="data/chips")
@@ -88,6 +92,18 @@ print(f"{W}x{H} px at {px:.0f} m; {len(bands)} bands, {N:,} chips "
 layout = dict(width=W, height=H, pixel_m=px, chip=C, stride=S, lon_of_x0=lon_of_x0, mars_radius_m=R, bands=bands)
 (work / "layout.json").write_text(json.dumps(layout))
 
+def chip_valid(chips):  # (B, C, w) uint8 -> (B,) bool
+    return ((chips == 0).mean(axis=(1, 2)) <= args.max_nodata) & ((chips < args.dark_level).mean(axis=(1, 2)) <= args.max_dark)
+
+
+def band_chips(b):  # all chips of a band as an iterator of (start index within band, (B, C, w) uint8)
+    band = ds.read(1, window=Window(0, b["r0"], W, C))
+    band = np.concatenate([band, band[:, : b["w"]]], axis=1)  # wrap at 360 deg
+    xs = [k * b["s"] for k in range(b["n"])]
+    for i in range(0, len(xs), args.batch):
+        yield i, np.stack([band[:, x:x + b["w"]] for x in xs[i:i + args.batch]])
+
+
 # ---------------------------------------------------------------- embeddings (resumable)
 emb_path, valid_path, prog_path = work / "emb_f16.npy", work / "valid.npy", work / "progress.json"
 if emb_path.exists():
@@ -110,13 +126,7 @@ if done < len(bands):
     bar = tqdm(total=remaining, unit="chip", smoothing=0.05)
     for bi in range(done, len(bands)):
         b = bands[bi]
-        band = ds.read(1, window=Window(0, b["r0"], W, C))
-        band = np.concatenate([band, band[:, : b["w"]]], axis=1)  # wrap at 360 deg
-        xs = [k * b["s"] for k in range(b["n"])]
-        for i in range(0, len(xs), args.batch):
-            xb = xs[i:i + args.batch]
-            chips = np.stack([band[:, x:x + b["w"]] for x in xb])  # (B, C, w) uint8
-            nod = (chips == 0).mean(axis=(1, 2))
+        for i, chips in band_chips(b):
             t = torch.from_numpy(chips).float().div_(255)[:, None]
             if b["w"] != args.input_size or C != args.input_size:  # area resize on CPU (MPS needs divisible sizes)
                 t = F.interpolate(t, size=(args.input_size, args.input_size), mode="area")
@@ -126,12 +136,18 @@ if done < len(bands):
                 e = image_embeddings(model, t)
             e = F.normalize(e.float(), dim=1).cpu().numpy().astype(np.float16)
             j0 = b["offset"] + i
-            emb[j0:j0 + len(xb)] = e
-            valid[j0:j0 + len(xb)] = (nod <= args.max_nodata).astype(np.uint8)
-            bar.update(len(xb))
+            emb[j0:j0 + len(chips)] = e
+            valid[j0:j0 + len(chips)] = chip_valid(chips)
+            bar.update(len(chips))
         emb.flush(); valid.flush()
         prog_path.write_text(json.dumps({"bands_done": bi + 1}))
     bar.close()
+
+if args.revalidate:
+    for b in tqdm(bands, desc="revalidate"):
+        for i, chips in band_chips(b):
+            valid[b["offset"] + i: b["offset"] + i + len(chips)] = chip_valid(chips)
+    valid.flush()
 
 # ---------------------------------------------------------------- PCA + quantisation
 X = np.asarray(emb, dtype=np.float32)

@@ -16,7 +16,7 @@ import torch
 from dinotxt import TEMPLATES, load_dinotxt, text_embeddings
 
 p = argparse.ArgumentParser()
-p.add_argument("--name", default="dinotxt_x3")
+p.add_argument("--name", default="themis")
 p.add_argument("--vocab", default="scripts/vocab_mars.txt")
 p.add_argument("--out_dir", default="web/data")
 p.add_argument("--pca_dir", default="data")

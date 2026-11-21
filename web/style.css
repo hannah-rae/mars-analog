@@ -13,11 +13,11 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
   font: 14px/1.45 Inter, system-ui, sans-serif; }
-#map { position: fixed; inset: 0; background: #000; cursor: crosshair; }
+#map { position: fixed; inset: 44px 0 0 0; background: #000; cursor: crosshair; }
 .ol-zoom { top: auto; bottom: 1em; left: auto; right: 1em; }
 .ol-scale-line { left: auto; right: 4.5em; bottom: 1em; }
 
-#panel { position: fixed; top: 12px; left: 12px; bottom: 12px; width: 330px; overflow-y: auto;
+#panel { position: fixed; top: 56px; left: 12px; bottom: 12px; width: 330px; overflow-y: auto;
   background: var(--panel); backdrop-filter: blur(8px); border: 1px solid var(--line);
   border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
 h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
@@ -123,4 +123,21 @@ footer p { margin: 6px 0 0; }
   .thumb { aspect-ratio: 1; }
   .thumb.query { aspect-ratio: auto; }
   .qtext b { font-size: 12px; }
+}
+
+/* top bar: brand + Mars/Moon switch */
+#topbar { position: fixed; top: 0; left: 0; right: 0; height: 44px; z-index: 3; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; padding: 0 16px; background: var(--panel); backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line); box-sizing: border-box; }
+#topbar .brand { font-weight: 600; font-size: 15px; width: 120px; }
+#topbar .src { width: 120px; text-align: right; color: var(--muted); }
+#bodySwitch a { padding: 4px 18px; color: var(--text); text-decoration: none; font-weight: 500; }
+#bodySwitch a:hover { background: rgba(255,255,255,0.08); }
+#bodySwitch a.on { background: var(--accent); color: #1a0f0b; font-weight: 600; }
+@media (max-width: 640px) {
+  #topbar { padding: 0 8px; }
+  #topbar .brand, #topbar .src { width: auto; }
+  #topbar .src { display: none; }
+  .ol-zoom { top: 52px; }
+  #preview { top: 52px; }
 }
