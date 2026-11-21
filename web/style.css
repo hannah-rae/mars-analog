@@ -91,3 +91,36 @@ footer p { margin: 6px 0 0; }
 #describeList li { display: flex; justify-content: space-between; padding: 2px 6px; border-radius: 6px; cursor: pointer; }
 #describeList li:hover { background: rgba(255,255,255,0.08); }
 .warn { color: #e5a853; }
+
+/* global viewer: top-10 preview strip, bottom-left of the map */
+#preview { position: fixed; left: 354px; bottom: 12px; z-index: 2; background: var(--panel); backdrop-filter: blur(8px);
+  border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px 10px; max-width: calc(100vw - 354px - 230px); }
+#preview h2 { font-size: 11px; }
+#preview button.ghost { padding: 0 8px; line-height: 1.4; }
+#preview.collapsed #previewGrid { display: none; }
+#previewGrid { display: grid; grid-template-columns: repeat(7, 84px); grid-auto-rows: 84px; gap: 6px; margin-top: 6px; }
+.thumb { position: relative; padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #111; cursor: pointer; }
+.thumb canvas { display: block; width: 100%; height: 100%; }
+.thumb:hover { border-color: var(--accent); }
+.thumb.query { grid-column: 1 / 3; grid-row: 1 / 3; border-color: var(--pos); cursor: default; }
+.thumb.query:has(canvas) { cursor: pointer; }
+.thumb .rank, .thumb .score, .thumb .tag { position: absolute; font: 600 10px var(--mono); padding: 1px 4px; border-radius: 4px;
+  background: rgba(10, 7, 6, 0.8); color: #fff; }
+.thumb .rank { top: 3px; left: 3px; color: var(--accent); }
+.thumb .score { bottom: 3px; right: 3px; }
+.thumb .tag { top: 4px; left: 4px; color: var(--pos); }
+.qtext { height: 100%; display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 10px; text-align: left; }
+.qtext b { font-size: 14px; line-height: 1.3; font-weight: 600; }
+@media (max-width: 1100px) {
+  #previewGrid { grid-template-columns: repeat(7, 60px); grid-auto-rows: 60px; gap: 4px; }
+  #preview { max-width: none; }
+}
+@media (max-width: 640px) {
+  #preview { left: 8px; right: 52px; top: 8px; bottom: auto; padding: 6px; }
+  .thumb .score { display: none; }
+  .thumb .rank { font-size: 9px; padding: 0 3px; }
+  #previewGrid { grid-template-columns: repeat(7, 1fr); grid-auto-rows: auto; }
+  .thumb { aspect-ratio: 1; }
+  .thumb.query { aspect-ratio: auto; }
+  .qtext b { font-size: 12px; }
+}

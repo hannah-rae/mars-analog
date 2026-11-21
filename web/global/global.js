@@ -12,7 +12,9 @@ const BODIES = {
   mars: {
     name: "Global Mars", data: "../data/themis",
     lede: "All of Mars in THEMIS daytime infrared, one DINOv3 embedding per ~22 km chip. Search by text, or click a chip to find others like it.",
-    tiles: { url: "https://trek.nasa.gov/tiles/Mars/EQ/THEMIS_DayIR_ControlledMosaics_100m_v2_oct2018/1.0.0/default/default028mm", ext: "png", levels: 10, extent: [-180, -65, 180, 65], credit: "THEMIS Day IR: NASA Mars Trek" },
+    tiles: { url: "https://trek.nasa.gov/tiles/Mars/EQ/THEMIS_DayIR_ControlledMosaics_100m_v2_oct2018/1.0.0/default/default028mm", ext: "png", levels: 10, extent: [-180, -65, 180, 65], credit: "THEMIS Day IR: NASA Mars Trek",
+      // the same v12 mosaic the embeddings came from, whole globe but coarser: used beyond +-65 deg
+      global: { url: "https://trek.nasa.gov/tiles/Mars/EQ/Mars_MO_THEMIS-IR-Day_mosaic_global_100m_v12_clon0_ly/1.0.0/default/default028mm", ext: "png", levels: 9, extent: EXTENT } },
     credits: 'Imagery: THEMIS Day IR 100 m global mosaic v12 (NASA/JPL/ASU, USGS Astrogeology); zoomed-in tiles from <a href="https://trek.nasa.gov/mars/" target="_blank" rel="noopener">NASA Mars Trek</a>. ',
     examples: ["impact crater", "sand dunes", "volcano", "canyon", "layered rock", "smooth plains", "river channel", "ice"],
     other: '<a href="?body=moon">Search the Moon →</a>',
@@ -152,16 +154,18 @@ function buildMap() {
     metersPerUnit: mPerDeg, getPointResolution: res => res });   // degrees at the equator; OL converts with metersPerUnit
   const overview = new ol.layer.Image({ source: new ol.source.ImageStatic({ url: `${DATA}/overview.jpg`, imageExtent: EXTENT, projection: proj }) });
   const T = BODY.tiles;
-  const trek = new ol.layer.Tile({
-    extent: T.extent, minZoom: 3,
+  const trekLayer = (L, credit) => new ol.layer.Tile({
+    extent: L.extent, minZoom: 3,
     source: new ol.source.XYZ({
       projection: proj, crossOrigin: "anonymous", wrapX: false,
       tileGrid: new ol.tilegrid.TileGrid({ extent: EXTENT, origin: [-180, 90], tileSize: 256,
-        resolutions: Array.from({ length: T.levels }, (_, z) => 180 / 256 / 2 ** z) }),
-      tileUrlFunction: ([z, x, y]) => `${T.url}/${z}/${y}/${x}.${T.ext}`,
-      attributions: T.credit,
+        resolutions: Array.from({ length: L.levels }, (_, z) => 180 / 256 / 2 ** z) }),
+      tileUrlFunction: ([z, x, y]) => `${L.url}/${z}/${y}/${x}.${L.ext}`,
+      attributions: credit,
     }),
   });
+  const trek = trekLayer(T, T.credit);
+  const trekGlobal = T.global ? trekLayer(T.global) : null;
   heatCanvas.width = HEAT_W; heatCanvas.height = HEAT_H;
   heatSource = new ol.source.ImageCanvas({
     projection: proj, ratio: 1,
@@ -198,7 +202,7 @@ function buildMap() {
 
   map = new ol.Map({
     target: "map",
-    layers: [overview, trek, heatLayer, namesLayer,
+    layers: [overview, ...(trekGlobal ? [trekGlobal] : []), trek, heatLayer, namesLayer,
       new ol.layer.Vector({ source: hoverSource, style: outline("#fff", 1.5) }),
       new ol.layer.Vector({ source: peakSource, style: peakStyle }),
       new ol.layer.Vector({ source: markerSource, style: markerStyle })],
@@ -260,7 +264,7 @@ function drawMarkers() {
 function drawPeaks() {
   peakSource.clear();
   const ol_ = $("peaks"); ol_.innerHTML = "";
-  if (!state.raw) { ol_.innerHTML = '<li class="empty">Search to see matches.</li>'; return; }
+  if (!state.raw) { ol_.innerHTML = '<li class="empty">Search to see matches.</li>'; renderPreview([]); return; }
   const [lo, hi] = state.stretch, minRaw = lo + Math.max(0.5, state.threshold) * (hi - lo);
   const cand = [];
   for (let i = 0; i < state.raw.length; i++) if (state.raw[i] >= minRaw) cand.push(i);
@@ -273,14 +277,107 @@ function drawPeaks() {
     taken.push(c); peaks.push(i);
     if (peaks.length >= 20) break;
   }
+  renderPreview(peaks.slice(0, 10));
   if (!peaks.length) { ol_.innerHTML = '<li class="empty">No matches above threshold.</li>'; return; }
   peaks.forEach((i, r) => {
     const c = chipCenter(i);
     if ($("showPeaks").checked) { const f = new ol.Feature(chipPolygon(i)); f.set("rank", r + 1); f.set("center", c); peakSource.addFeature(f); }
     const li = document.createElement("li");
     li.innerHTML = `<span class="n">${r + 1}</span><span>${fmtLL(c)}</span><span>${state.raw[i].toFixed(3)}</span>`;
-    li.onclick = () => map.getView().fit(chipPolygon(i).getExtent(), { padding: [150, 150, 150, window.innerWidth > 640 ? 500 : 150], duration: 400, maxZoom: 7 });
+    li.onclick = () => zoomToChip(i);
     ol_.appendChild(li);
+  });
+}
+
+function zoomToChip(i) {
+  map.getView().fit(chipPolygon(i).getExtent(), { padding: [150, 150, 150, window.innerWidth > 640 ? 500 : 150], duration: 400, maxZoom: 7 });
+}
+
+// ------------------------------------------------------------------ preview thumbnails
+// Each thumbnail is the chip's lon/lat box resampled to a square, i.e. what the model saw (224 x 224 px).
+// Drawn from the overview basemap at once, then from Trek tiles where they exist (CORS-enabled).
+const tileCache = new Map();
+let overviewImg = null, previewKey = "";
+function loadImage(url, cors) {
+  return new Promise(res => {
+    const img = new Image(); if (cors) img.crossOrigin = "anonymous";
+    img.onload = () => res(img); img.onerror = () => res(null); img.src = url;
+  });
+}
+function tileImage(T, z, x, y) {
+  const url = `${T.url}/${z}/${y}/${x}.${T.ext}`;
+  if (!tileCache.has(url)) tileCache.set(url, loadImage(url, true));
+  return tileCache.get(url);
+}
+function drawOverviewCrop(ctx, img, [lon0, lat0, lon1, lat1], size) {
+  const ppd = img.naturalWidth / 360, sx = size / (lon1 - lon0), sy = size / (lat1 - lat0);
+  for (const shift of [0, -360]) {      // a chip may cross +180: draw its wrapped part too
+    const a = lon0 + shift, b = Math.min(lon1 + shift, 180);
+    if (b <= -180 || a >= 180) continue;
+    const ca = Math.max(a, -180);
+    ctx.drawImage(img, (ca + 180) * ppd, (90 - lat1) * ppd, (b - ca) * ppd, (lat1 - lat0) * ppd,
+      (ca - a) * sx, 0, (b - ca) * sx, size);
+  }
+}
+async function drawChipThumb(canvas, i) {
+  const size = canvas.width, ctx = canvas.getContext("2d"), bb = chipBounds(i), [lon0, lat0, lon1, lat1] = bb;
+  ctx.fillStyle = "#111"; ctx.fillRect(0, 0, size, size);
+  overviewImg ??= loadImage(`${DATA}/overview.jpg`, false);
+  const ov = await overviewImg;
+  if (ov) drawOverviewCrop(ctx, ov, bb, size);
+  const inside = L => L && lat0 >= L.extent[1] && lat1 <= L.extent[3];
+  const T = inside(BODY.tiles) ? BODY.tiles : inside(BODY.tiles.global) ? BODY.tiles.global : null;
+  if (!T) return;                                            // no tiles here: overview only
+  // finest level with at least `size` px across the chip height, and no more than 16 tiles
+  let z = Math.min(T.levels - 1, Math.max(0, Math.ceil(Math.log2(180 * size / (256 * (lat1 - lat0))))));
+  const span = z => 180 / 2 ** z, count = z => (Math.floor((lon1 + 180) / span(z)) - Math.floor((lon0 + 180) / span(z)) + 1) *
+    (Math.floor((90 - lat0) / span(z)) - Math.floor((90 - lat1) / span(z)) + 1);
+  while (z > 0 && count(z) > 16) z--;
+  const d = span(z), cols = 2 ** (z + 1), sx = size / (lon1 - lon0), sy = size / (lat1 - lat0);
+  const x0 = Math.floor((lon0 + 180) / d), x1 = Math.floor((lon1 + 180 - 1e-9) / d);
+  const y0 = Math.floor((90 - lat1) / d), y1 = Math.floor((90 - lat0 - 1e-9) / d);
+  const jobs = [];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    jobs.push(tileImage(T, z, ((x % cols) + cols) % cols, y).then(img => {
+      if (!img) return;
+      const tl = x * d - 180, tt = 90 - y * d;                 // tile's top-left lon/lat (unwrapped)
+      ctx.drawImage(img, (tl - lon0) * sx, (lat1 - tt) * sy, d * sx, d * sy);
+    }));
+  }
+  await Promise.all(jobs);
+}
+function renderPreview(peaks) {
+  const box = $("preview");
+  if (!box) return;
+  const query = state.text ? "t:" + state.text : "p:" + state.pos.join(",");
+  const key = query + "|" + peaks.join(",");
+  if (key === previewKey) return;          // threshold slider moves often redraw the same list
+  previewKey = key;
+  box.hidden = !peaks.length;
+  if (!peaks.length) return;
+  const grid = $("previewGrid"); grid.innerHTML = "";
+  const q = document.createElement("div"); q.className = "thumb query";
+  if (state.text) {
+    q.innerHTML = `<div class="qtext"><span class="small">text</span><b></b></div>`;
+    q.querySelector("b").textContent = `“${state.text}”`;
+  } else if (state.pos.length) {
+    const c = document.createElement("canvas"); c.width = c.height = 224; q.appendChild(c);
+    q.insertAdjacentHTML("beforeend", `<span class="tag">query${state.pos.length > 1 ? ` +${state.pos.length - 1}` : ""}</span>`);
+    q.title = fmtLL(chipCenter(state.pos[0])); q.onclick = () => zoomToChip(state.pos[0]);
+    drawChipThumb(c, state.pos[0]);
+  } else {
+    q.innerHTML = `<div class="qtext"><span class="small">negatives only</span></div>`;
+  }
+  grid.appendChild(q);
+  peaks.forEach((i, r) => {
+    const t = document.createElement("button"); t.className = "thumb"; t.title = `#${r + 1} · ${fmtLL(chipCenter(i))} · score ${state.raw[i].toFixed(3)}`;
+    const c = document.createElement("canvas"); c.width = c.height = 112; t.appendChild(c);
+    t.insertAdjacentHTML("beforeend", `<span class="rank">${r + 1}</span><span class="score">${state.raw[i].toFixed(2)}</span>`);
+    t.onclick = () => zoomToChip(i);
+    t.onmouseenter = () => { hoverSource.clear(); hoverSource.addFeature(new ol.Feature(chipPolygon(i))); };
+    t.onmouseleave = () => hoverSource.clear();
+    grid.appendChild(t);
+    drawChipThumb(c, i);
   });
 }
 
@@ -396,6 +493,11 @@ async function main() {
   $("clear").onclick = () => { state.pos = []; state.neg = []; state.text = null; update(); };
   $("showPeaks").onchange = drawPeaks;
   $("showHover").onchange = () => hoverSource.clear();
+  const setCollapsed = v => { $("preview").classList.toggle("collapsed", v); $("previewToggle").textContent = v ? "+" : "–";
+    $("previewToggle").title = v ? "Show previews" : "Hide previews"; try { localStorage.setItem("previewCollapsed", v ? "1" : ""); } catch {} };
+  let collapsed = false; try { collapsed = !!localStorage.getItem("previewCollapsed"); } catch {}
+  setCollapsed(collapsed);
+  $("previewToggle").onclick = () => setCollapsed(!$("preview").classList.contains("collapsed"));
   $("showNames").onchange = e => namesLayer.setVisible(e.target.checked);
   document.querySelectorAll(".seg button[data-view]").forEach(b => b.onclick = () => {
     state.view = b.dataset.view;
