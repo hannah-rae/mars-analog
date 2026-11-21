@@ -43,6 +43,12 @@ function coordToIndex([x, y]) {
   if (c < 0 || r < 0 || c >= m.grid.width || r >= m.grid.height) return -1;
   return r * m.grid.width + c;
 }
+function cellExtent(i) {
+  const m = state.meta, [left, , , top] = m.bounds_m;
+  const c = i % m.grid.width, r = Math.floor(i / m.grid.width);
+  return [left + c * m.token_m, top - (r + 1) * m.token_m, left + (c + 1) * m.token_m, top - r * m.token_m];
+}
+const cellPolygon = i => ol.geom.Polygon.fromExtent(cellExtent(i));
 function indexToCoord(i) {
   const m = state.meta, [left, , , top] = m.bounds_m;
   const c = i % m.grid.width, r = Math.floor(i / m.grid.width);
@@ -69,7 +75,8 @@ async function fetchBytes(url, label) {
 const status = t => { $("status").textContent = t; };
 
 // ------------------------------------------------------------------ map
-let map, proj, heatSource, heatLayer, pcaLayer, markerSource, peakSource, landingLayer;
+let map, proj, heatSource, heatLayer, pcaLayer, markerSource, peakSource, landingLayer, gridLayer, hoverSource;
+const MIN_CELL_PX = 7;  // draw cells as squares / grid lines once a token is at least this many screen px
 const heatCanvas = document.createElement("canvas");
 
 function buildMap() {
@@ -103,9 +110,52 @@ function buildMap() {
 
   markerSource = new ol.source.Vector();
   peakSource = new ol.source.Vector();
-  const markerStyle = f => new ol.style.Style({
-    image: new ol.style.Circle({ radius: 6, fill: new ol.style.Fill({ color: f.get("neg") ? "#ef5d5d" : "#7fd18b" }),
-      stroke: new ol.style.Stroke({ color: "#000", width: 2 }) }),
+  // examples: a dot when zoomed out, the actual token cell once it is big enough to see
+  const markerStyle = (f, res) => {
+    const color = f.get("neg") ? "#ef5d5d" : "#7fd18b";
+    if (state.meta.token_m / res < MIN_CELL_PX) return new ol.style.Style({
+      image: new ol.style.Circle({ radius: 6, fill: new ol.style.Fill({ color }), stroke: new ol.style.Stroke({ color: "#000", width: 2 }) }),
+    });
+    return [
+      new ol.style.Style({ geometry: cellPolygon(f.get("index")), stroke: new ol.style.Stroke({ color: "#000", width: 4 }) }),
+      new ol.style.Style({ geometry: cellPolygon(f.get("index")), stroke: new ol.style.Stroke({ color, width: 2 }),
+        fill: new ol.style.Fill({ color: f.get("neg") ? "rgba(239,93,93,0.25)" : "rgba(127,209,139,0.25)" }) }),
+    ];
+  };
+
+  // token grid: cell boundaries in view, only when cells are large enough on screen
+  gridLayer = new ol.layer.Image({
+    visible: false,
+    source: new ol.source.ImageCanvas({
+      projection: proj, ratio: 1,
+      canvasFunction: (extent, resolution, pixelRatio, size) => {
+        const c = document.createElement("canvas");
+        c.width = size[0]; c.height = size[1];
+        const m = state.meta, tm = m.token_m, g = gridExtent();
+        const sx = size[0] / (extent[2] - extent[0]), sy = size[1] / (extent[3] - extent[1]);
+        if (tm * sx < MIN_CELL_PX * pixelRatio) return c;
+        const ctx = c.getContext("2d");
+        ctx.strokeStyle = "rgba(255,255,255,0.28)"; ctx.lineWidth = pixelRatio;
+        const x0 = Math.max(g[0], extent[0]), x1 = Math.min(g[2], extent[2]);
+        const y0 = Math.max(g[1], extent[1]), y1 = Math.min(g[3], extent[3]);
+        ctx.beginPath();
+        for (let x = g[0] + Math.ceil((x0 - g[0]) / tm) * tm; x <= x1; x += tm) {
+          const px = Math.round((x - extent[0]) * sx) + 0.5; ctx.moveTo(px, (extent[3] - y1) * sy); ctx.lineTo(px, (extent[3] - y0) * sy);
+        }
+        for (let y = g[3] - Math.ceil((g[3] - y1) / tm) * tm; y >= y0; y -= tm) {
+          const py = Math.round((extent[3] - y) * sy) + 0.5; ctx.moveTo((x0 - extent[0]) * sx, py); ctx.lineTo((x1 - extent[0]) * sx, py);
+        }
+        ctx.stroke();
+        return c;
+      },
+    }),
+  });
+  // the cell under the cursor (what a click would select)
+  hoverSource = new ol.source.Vector();
+  const hoverLayer = new ol.layer.Vector({
+    source: hoverSource,
+    style: [new ol.style.Style({ stroke: new ol.style.Stroke({ color: "rgba(0,0,0,0.7)", width: 3.5 }) }),
+            new ol.style.Style({ stroke: new ol.style.Stroke({ color: "#fff", width: 1.5 }) })],
   });
   const peakStyle = f => new ol.style.Style({
     image: new ol.style.Circle({ radius: 10, fill: new ol.style.Fill({ color: "rgba(20,14,12,0.8)" }),
@@ -127,7 +177,7 @@ function buildMap() {
 
   map = new ol.Map({
     target: "map",
-    layers: [base, heatLayer, pcaLayer, landingLayer,
+    layers: [base, heatLayer, pcaLayer, gridLayer, landingLayer, hoverLayer,
       new ol.layer.Vector({ source: peakSource, style: peakStyle }),
       new ol.layer.Vector({ source: markerSource, style: markerStyle })],
     view: new ol.View({ projection: proj, extent: ext, constrainOnlyCenter: true, maxZoom: 22 }),
@@ -146,7 +196,10 @@ function buildMap() {
   map.on("pointermove", e => {
     if (e.dragging) return;
     const i = coordToIndex(e.coordinate);
+    hoverSource.clear();
+    if (gridLayer.getVisible() && i >= 0) hoverSource.addFeature(new ol.Feature(cellPolygon(i)));
     let t = fmtLL(toLonLat(e.coordinate));
+    if (gridLayer.getVisible() && i >= 0) t += `  cell ${Math.floor(i / state.meta.grid.width)},${i % state.meta.grid.width}`;
     if (i >= 0 && state.vals && !Number.isNaN(state.vals[i])) t += `  score ${state.raw[i].toFixed(3)}`;
     $("readout").textContent = t;
   });
@@ -174,7 +227,7 @@ function drawHeat() {
 function drawMarkers() {
   markerSource.clear();
   for (const [list, neg] of [[state.pos, false], [state.neg, true]])
-    for (const i of list) { const f = new ol.Feature(new ol.geom.Point(indexToCoord(i))); f.set("neg", neg); markerSource.addFeature(f); }
+    for (const i of list) { const f = new ol.Feature(new ol.geom.Point(indexToCoord(i))); f.set("neg", neg); f.set("index", i); markerSource.addFeature(f); }
   const ul = $("examples"); ul.innerHTML = "";
   for (const [list, cls] of [[state.pos, "pos"], [state.neg, "neg"]])
     list.forEach((i, k) => {
@@ -310,10 +363,21 @@ async function main() {
   $("clear").onclick = () => { state.pos = []; state.neg = []; state.text = null; update(); };
   $("showPeaks").onchange = drawPeaks;
   $("showLanding").onchange = e => landingLayer.setVisible(e.target.checked);
+  const setGrid = on => {
+    gridLayer.setVisible(on); $("showGrid").checked = on;
+    if (!on) hoverSource.clear();
+    try { localStorage.setItem("mars-analog:grid", on ? "1" : "0"); } catch {}
+  };
+  $("showGrid").onchange = e => setGrid(e.target.checked);
+  let gridPref = null;
+  try { gridPref = localStorage.getItem("mars-analog:grid"); } catch {}
+  setGrid(gridPref === "1");
+  $("gridLabel").textContent = `Show token grid (${state.meta.token_m.toFixed(0)} m cells)`;
   document.querySelectorAll(".seg button").forEach(b => b.onclick = () => setView(b.dataset.view));
   document.addEventListener("keydown", e => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
     if (e.key === "Escape") { state.pos = []; state.neg = []; state.text = null; update(); }
+    if (e.key === "g") setGrid(!gridLayer.getVisible());
     if (e.key === " ") { e.preventDefault(); setView(state.view === "heat" ? "none" : "heat"); }
   });
   if (state.vocab) initTextUI();

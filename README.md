@@ -99,7 +99,7 @@ shows a dropdown to switch between embedding sets.
 
 Controls: type or pick a phrase to search by text. **Click** adds a positive
 example, **Shift+click** a negative, **Alt+click** shows matching phrases,
-**Esc** clears, **Space** toggles the heatmap. The query is saved in the URL
+**Esc** clears, **Space** toggles the heatmap, **G** toggles the token grid. With the grid on, the cell under the cursor (the exact 32 m token a click selects) is outlined, grid lines appear once cells are big enough on screen, and selected examples are drawn as their cells. The query is saved in the URL
 hash, so you can share a link to a search.
 
 ## Deploy
