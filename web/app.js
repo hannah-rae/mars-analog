@@ -1,4 +1,4 @@
-import { EmbeddingGrid, quantiles, findPeaks } from "./search.js";
+import { EmbeddingGrid, quantiles, findPeaks, backgroundLSE } from "./search.js";
 
 const ol = window.ol;
 const $ = id => document.getElementById(id);
@@ -20,6 +20,8 @@ const LUT = (() => {
 const state = {
   config: null, meta: null, grid: null, R: 3396190,
   pos: [], neg: [],            // token indices
+  text: null,                  // active text query (vocab phrase)
+  vocab: null, lse: null,      // dino.txt vocabulary + background log-sum-exp per token
   vals: null,                  // normalised scores in [0,1] (NaN = invalid)
   raw: null,                   // raw score
   threshold: 0.5, view: "heat",
@@ -136,6 +138,8 @@ function buildMap() {
   map.on("singleclick", e => {
     const i = coordToIndex(e.coordinate);
     if (i < 0 || !state.grid.valid[i]) return;
+    if (e.originalEvent.altKey && state.vocab) { describe(i); return; }
+    state.text = null;
     (e.originalEvent.shiftKey ? state.neg : state.pos).push(i);
     update();
   });
@@ -205,10 +209,13 @@ function drawPeaks() {
 function update() {
   drawMarkers();
   writeHash();
+  syncTextUI();
+  if (state.text) return updateText();
   if (!state.pos.length && !state.neg.length) {
     state.vals = state.raw = null; drawHeat(); drawPeaks(); status(readyText()); return;
   }
   const t0 = performance.now();
+  $("legTitle").textContent = "similarity to examples";
   const raw = state.grid.score(state.pos, state.neg);
   const [lo, hi] = quantiles(raw, [0.5, 0.9995]);
   const vals = new Float32Array(raw.length);
@@ -231,11 +238,13 @@ function setView(v) {
 // ------------------------------------------------------------------ url state
 function writeHash() {
   const ll = i => toLonLat(indexToCoord(i)).map(x => x.toFixed(5)).join(",");
-  const parts = [...state.pos.map(i => "p" + ll(i)), ...state.neg.map(i => "n" + ll(i))];
+  const parts = state.text ? ["t" + encodeURIComponent(state.text)]
+    : [...state.pos.map(i => "p" + ll(i)), ...state.neg.map(i => "n" + ll(i))];
   history.replaceState(null, "", parts.length ? "#" + parts.join(";") : location.pathname + location.search);
 }
 function readHash() {
-  for (const p of decodeURIComponent(location.hash.slice(1)).split(";").filter(Boolean)) {
+  for (const p of location.hash.slice(1).split(";").filter(Boolean)) {
+    if (p[0] === "t") { state.text = decodeURIComponent(p.slice(1)); continue; }
     const [lon, lat] = p.slice(1).split(",").map(Number);
     const i = coordToIndex(fromLonLat([lon, lat]));
     if (i >= 0) (p[0] === "n" ? state.neg : state.pos).push(i);
@@ -260,6 +269,12 @@ async function loadDataset(ds) {
   status("Preparing…");
   await new Promise(r => setTimeout(r));
   state.grid = new EmbeddingGrid(state.meta, codes, valid);
+  if (ds.text) {
+    state.vocab = await (await fetch(`${ds.path}/vocab.json`)).json();
+    state.vocab.byText = new Map(state.vocab.phrases.map(p => [p.text.toLowerCase(), p]));
+    const bg = state.vocab.background.map(t => state.vocab.byText.get(t.toLowerCase()));
+    state.lse = backgroundLSE(state.grid, bg, state.vocab.logit_scale);
+  }
 }
 
 async function main() {
@@ -292,16 +307,90 @@ async function main() {
 
   $("threshold").oninput = e => { state.threshold = +e.target.value; $("thrVal").value = state.threshold.toFixed(2); drawHeat(); drawPeaks(); };
   $("opacity").oninput = e => { const v = +e.target.value; $("opVal").value = v.toFixed(2); heatLayer.setOpacity(v); pcaLayer.setOpacity(v); };
-  $("clear").onclick = () => { state.pos = []; state.neg = []; update(); };
+  $("clear").onclick = () => { state.pos = []; state.neg = []; state.text = null; update(); };
   $("showPeaks").onchange = drawPeaks;
   $("showLanding").onchange = e => landingLayer.setVisible(e.target.checked);
   document.querySelectorAll(".seg button").forEach(b => b.onclick = () => setView(b.dataset.view));
   document.addEventListener("keydown", e => {
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-    if (e.key === "Escape") { state.pos = []; state.neg = []; update(); }
+    if (e.key === "Escape") { state.pos = []; state.neg = []; state.text = null; update(); }
     if (e.key === " ") { e.preventDefault(); setView(state.view === "heat" ? "none" : "heat"); }
   });
+  if (state.vocab) initTextUI();
   update();
+}
+
+// ------------------------------------------------------------------ text search
+function initTextUI() {
+  $("textCard").hidden = false;
+  const v = state.vocab;
+  for (const p of v.phrases) $("vocabList").appendChild(new Option(p.text));
+  $("textHint").innerHTML = `${v.phrases.length} precomputed phrases (dino.txt) · <kbd>Alt</kbd>+<kbd>Click</kbd> the map to see which phrases match a spot`;
+  for (const t of state.config.text_examples || []) {
+    const b = document.createElement("button"); b.textContent = t; b.dataset.text = t;
+    b.onclick = () => runText(t);
+    $("textChips").appendChild(b);
+  }
+  $("textForm").onsubmit = e => { e.preventDefault(); runText($("textInput").value); };
+  $("describeClose").onclick = () => { $("describe").hidden = true; };
+}
+
+function runText(t) {
+  t = (t || "").trim();
+  if (!t) return;
+  const hit = state.vocab.byText.get(t.toLowerCase());
+  if (!hit) {
+    const near = state.vocab.phrases.filter(p => p.text.includes(t.toLowerCase().split(" ").pop())).slice(0, 4).map(p => `"${p.text}"`);
+    $("textHint").innerHTML = `<span class="warn">"${t}" isn't in the precomputed vocabulary.</span> ${near.length ? "Try " + near.join(", ") + "." : "Pick a phrase from the list."}`;
+    return;
+  }
+  state.text = hit.text; state.pos = []; state.neg = [];
+  update();
+}
+
+function syncTextUI() {
+  if (!state.vocab) return;
+  $("textInput").value = state.text || "";
+  document.querySelectorAll("#textChips button").forEach(b => b.classList.toggle("on", b.dataset.text === state.text));
+}
+
+function updateText() {
+  const t0 = performance.now();
+  const p = state.vocab.byText.get(state.text.toLowerCase());
+  if (!p) { state.text = null; return update(); }
+  const cos = state.grid.textCosine(p.q, p.b);
+  const isBg = state.vocab.background.some(b => b.toLowerCase() === p.text.toLowerCase());
+  const vals = new Float32Array(cos.length);
+  if (isBg) {
+    // relative score against itself is meaningless: stretch raw cosine instead
+    const [lo, hi] = quantiles(cos, [0.5, 0.999]);
+    for (let i = 0; i < cos.length; i++) vals[i] = Number.isNaN(cos[i]) ? NaN : Math.min(1, Math.max(0, (cos[i] - lo) / (hi - lo)));
+    state.raw = cos; state.stretch = [lo, hi];
+    $("legTitle").textContent = "cosine (background phrase)"; $("legLo").textContent = lo.toFixed(3); $("legHi").textContent = hi.toFixed(3);
+  } else {
+    const s = state.vocab.logit_scale, lse = state.lse;
+    for (let i = 0; i < cos.length; i++) vals[i] = Number.isNaN(cos[i]) ? NaN : 1 / (1 + Math.exp(lse[i] - s * cos[i]));
+    state.raw = vals; state.stretch = [0, 1];
+    $("legTitle").textContent = "P(query vs background)"; $("legLo").textContent = "0"; $("legHi").textContent = "1";
+  }
+  state.vals = vals;
+  drawHeat(); drawPeaks();
+  status(`${readyText()} · "${p.text}" in ${(performance.now() - t0).toFixed(0)} ms`);
+}
+
+function describe(i) {
+  const v = state.vocab, s = v.logit_scale;
+  const cos = state.grid.textCosineAt(i, v.phrases);
+  const m = Math.max(...cos), ex = cos.map(c => Math.exp(s * (c - m))), z = ex.reduce((a, b) => a + b, 0);
+  const ranked = v.phrases.map((p, k) => ({ text: p.text, cos: cos[k], prob: ex[k] / z })).sort((a, b) => b.cos - a.cos).slice(0, 8);
+  const ol_ = $("describeList"); ol_.innerHTML = "";
+  for (const r of ranked) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span>${r.text}</span><span>${r.cos.toFixed(3)} · ${(100 * r.prob).toFixed(0)}%</span>`;
+    li.onclick = () => runText(r.text);
+    ol_.appendChild(li);
+  }
+  $("describe").hidden = false;
 }
 
 main().catch(err => { console.error(err); status(`Error: ${err.message}`); });

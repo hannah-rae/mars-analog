@@ -1,0 +1,127 @@
+# Phrases precomputed for text search (one per line). Lines starting with "bg:" are
+# background prompts: each query is scored relative to these (DINO-Sats style).
+bg:the surface of Mars
+bg:rocky terrain
+bg:rough terrain
+bg:smooth plains
+bg:bedrock
+bg:dust
+bg:the ground
+bg:a satellite image
+# --- landforms
+sand dunes
+sand ripples
+dark sand
+bright sand
+dune field
+impact crater
+small impact craters
+fresh impact crater
+degraded crater
+crater rim
+crater floor
+crater ejecta
+secondary craters
+river delta
+fan-shaped delta
+alluvial fan
+river channel
+dry riverbed
+meandering river
+braided channels
+inverted channels
+valley
+canyon
+gully
+cliff
+steep slope
+escarpment
+scarp
+ridge
+wrinkle ridge
+mesa
+butte
+plateau
+hills
+knobs
+mounds
+buttes and mesas
+layered rock
+layered sedimentary rock
+sedimentary layers
+stratified cliffs
+eroded rock
+wind-eroded rock
+yardangs
+boulders
+boulder field
+rocks
+cobbles
+gravel
+sand
+sandstone
+clay
+mudstone
+lake bed
+dry lake
+an ancient lake
+shoreline
+lava flow
+volcanic rock
+basalt
+cracked ground
+polygonal ground
+fractured rock
+fractures
+faults
+dark patches
+bright patches
+light-toned rock
+dark-toned rock
+smooth terrain
+hummocky terrain
+pitted terrain
+rugged terrain
+flat terrain
+plains
+desert
+sand sea
+erosion
+sediment
+mud
+pebbles
+mountains
+highlands
+lowlands
+basin
+depression
+pit
+trough
+dust devil tracks
+wind streaks
+tracks
+# --- everyday words people will try
+water
+ice
+snow
+a river
+a lake
+a road
+a building
+a city
+a field
+a forest
+a beach
+an ocean
+a rover
+a spacecraft
+a parachute
+a landing site
+a lunar surface
+the moon
+Earth
+a desert from above
+the Sahara
+a canyon from above
+a volcano
+a mountain range

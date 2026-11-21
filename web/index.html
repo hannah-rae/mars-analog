@@ -16,12 +16,27 @@
   <aside id="panel">
     <header>
       <h1>Mars Analog <span class="sub">Jezero Crater</span></h1>
-      <p class="lede">Click anything on the CTX image. DINOv3 finds every place that looks like it.</p>
+      <p class="lede">Search Jezero by text, or click anything to find places that look like it. Powered by DINOv3 and dino.txt.</p>
     </header>
+
+    <section class="card" id="textCard" hidden>
+      <h2>Text search</h2>
+      <form id="textForm" class="row">
+        <input id="textInput" list="vocabList" placeholder="e.g. sand dunes" autocomplete="off" spellcheck="false">
+        <button type="submit">Search</button>
+        <datalist id="vocabList"></datalist>
+      </form>
+      <div id="textChips" class="chips"></div>
+      <p class="hint" id="textHint"></p>
+      <div id="describe" hidden>
+        <div class="row space"><h2>DINOv3 sees here</h2><button id="describeClose" class="ghost" title="Close">×</button></div>
+        <ol id="describeList"></ol>
+      </div>
+    </section>
 
     <section class="card">
       <div class="row space">
-        <h2>Query</h2>
+        <h2>Click search</h2>
         <button id="clear" class="ghost" title="Clear examples (Esc)">Clear</button>
       </div>
       <p class="hint"><kbd>Click</kbd> add a positive example · <kbd>Shift</kbd>+<kbd>Click</kbd> add a negative</p>
@@ -48,7 +63,7 @@
         <button data-view="pca">PCA features</button>
         <button data-view="none">Image only</button>
       </div>
-      <div id="legend"><canvas id="legendCanvas" width="256" height="1"></canvas>
+      <div id="legend"><div id="legTitle" class="small">similarity</div><canvas id="legendCanvas" width="256" height="1"></canvas>
         <div class="row space mono small"><span id="legLo">less similar</span><span id="legHi">more similar</span></div></div>
       <label class="row small"><input type="checkbox" id="showLanding" checked> Perseverance landing site</label>
       <label class="row small" id="datasetRow" hidden>Embeddings <select id="dataset"></select></label>

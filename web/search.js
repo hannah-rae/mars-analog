@@ -69,6 +69,46 @@ export class EmbeddingGrid {
   }
 }
 
+/**
+ * Text scoring. Tokens were L2-normalised before PCA, so for a unit text vector t
+ *   cos(t, x) ~= t.mu + (C t) . p,   p = PCA coords = vmin + code * step
+ * vocab.json stores q = C t and b = t.mu per phrase.
+ */
+EmbeddingGrid.prototype.textCosine = function (q, b, out = new Float32Array(this.n)) {
+  const { k, n, codes, valid, vmin, step } = this;
+  const w = new Float32Array(k);
+  let bias = b;
+  for (let j = 0; j < k; j++) { w[j] = q[j] * step[j]; bias += q[j] * vmin[j]; }
+  for (let i = 0, o = 0; i < n; i++, o += k) {
+    if (!valid[i]) { out[i] = NaN; continue; }
+    let s = bias;
+    for (let j = 0; j < k; j++) s += w[j] * codes[o + j];
+    out[i] = s;
+  }
+  return out;
+};
+
+/** cosine of every vocab phrase at token i */
+EmbeddingGrid.prototype.textCosineAt = function (i, phrases) {
+  const o = i * this.k;
+  return phrases.map(p => {
+    let s = p.b;
+    for (let j = 0; j < this.k; j++) s += p.q[j] * (this.vmin[j] + this.codes[o + j] * this.step[j]);
+    return s;
+  });
+};
+
+/** per-token log-sum-exp of scale * cos over background phrases */
+export function backgroundLSE(grid, bgPhrases, scale) {
+  const n = grid.n, mx = new Float32Array(n).fill(-Infinity), sum = new Float32Array(n);
+  const cos = bgPhrases.map(p => grid.textCosine(p.q, p.b));
+  for (const c of cos) for (let i = 0; i < n; i++) if (scale * c[i] > mx[i]) mx[i] = scale * c[i];
+  for (const c of cos) for (let i = 0; i < n; i++) sum[i] += Math.exp(scale * c[i] - mx[i]);
+  const lse = new Float32Array(n);
+  for (let i = 0; i < n; i++) lse[i] = mx[i] + Math.log(sum[i]);
+  return lse;
+}
+
 /** approximate quantiles from a strided sample */
 export function quantiles(arr, qs, sampleSize = 100000) {
   const stride = Math.max(1, Math.floor(arr.length / sampleSize));

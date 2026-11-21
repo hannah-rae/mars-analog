@@ -51,11 +51,15 @@ def main():
     p.add_argument("--out_dir", default="web/data")
     p.add_argument("--name", default=None, help="output sub-folder (default: derived from model + factor)")
     p.add_argument("--model", default="vit_large_patch16_dinov3.sat493m",
-                   help="timm model name, e.g. vit_large_patch16_dinov3.sat493m or vit_large_patch16_dinov3.lvd1689m")
+                   help="'dinotxt' (DINOv3 LVD + dino.txt head, enables text search) or a timm model name, "
+                        "e.g. vit_large_patch16_dinov3.sat493m")
+    p.add_argument("--weights_dir", default="weights", help="dino.txt checkpoint folder (dinotxt only)")
+    p.add_argument("--dinov3_repo", default="../third_party/dinov3", help="clone of facebookresearch/dinov3 (dinotxt only)")
     p.add_argument("--factor", type=int, default=3, help="upsampling factor applied before the 16 px patch model")
     p.add_argument("--window", type=int, default=1024, help="window size in upsampled pixels (multiple of 16)")
     p.add_argument("--stride", type=int, default=256, help="window stride in upsampled pixels (multiple of 16)")
     p.add_argument("--n_components", type=int, default=64)
+    p.add_argument("--pca_out_dir", default="data", help="where to save the PCA basis (not served)")
     p.add_argument("--pca_sample", type=int, default=300_000)
     p.add_argument("--device", default="auto")
     p.add_argument("--batch", type=int, default=2)
@@ -89,12 +93,22 @@ def main():
           f"{transform.a * tok_src_px:.1f} m each)")
 
     # ---------------------------------------------------------------- model
-    model = timm.create_model(args.model, pretrained=True).eval().to(device)
-    cfg = timm.data.resolve_data_config({}, model=model)
-    mean = torch.tensor(cfg["mean"]).view(1, 3, 1, 1).to(device)
-    std = torch.tensor(cfg["std"]).view(1, 3, 1, 1).to(device)
-    n_prefix = model.num_prefix_tokens
-    dim = model.num_features
+    if args.model == "dinotxt":
+        # DINOv3 ViT-L/16 LVD-1689M + dino.txt vision head: patch tokens aligned with text
+        from dinotxt import IMAGENET_MEAN, IMAGENET_STD, load_dinotxt, patch_tokens
+        dt_model, _ = load_dinotxt(args.weights_dir, args.dinov3_repo)
+        dt_model.to(device)
+        mean = torch.tensor(IMAGENET_MEAN).view(1, 3, 1, 1).to(device)
+        std = torch.tensor(IMAGENET_STD).view(1, 3, 1, 1).to(device)
+        dim = 1024
+        forward = lambda t: patch_tokens(dt_model, t).flatten(1, 2)
+    else:
+        model = timm.create_model(args.model, pretrained=True).eval().to(device)
+        cfg = timm.data.resolve_data_config({}, model=model)
+        mean = torch.tensor(cfg["mean"]).view(1, 3, 1, 1).to(device)
+        std = torch.tensor(cfg["std"]).view(1, 3, 1, 1).to(device)
+        dim = model.num_features
+        forward = lambda t: model.forward_features(t)[:, model.num_prefix_tokens:]
 
     wt = args.window // 16
     hann = torch.hann_window(wt + 2, periodic=False)[1:-1]
@@ -117,7 +131,7 @@ def main():
             tiles = tiles[:, None].expand(-1, 3, -1, -1).to(device)
             tiles = (tiles - mean) / std
             with torch.autocast(device.type, dtype=torch.float16, enabled=amp):
-                feats = model.forward_features(tiles)[:, n_prefix:]
+                feats = forward(tiles)
             feats = feats.float().cpu().view(len(batch), wt, wt, dim)
             for (y, x0), ft in zip(batch, feats):
                 ty, tx = y // 16, x0 // 16
@@ -160,6 +174,9 @@ def main():
     print(f"quantisation self-cosine (mean): {(a * b).sum(1).mean():.4f}")
 
     codes.tofile(out / "embeddings.u8")
+    # PCA basis, needed to project text embeddings (scripts/embed_vocab.py); not served
+    np.savez(Path(args.pca_out_dir) / f"{name}_pca.npz",
+             mean=mu.numpy(), components=comps.numpy(), vmin=lo, vmax=hi)
     np.packbits(vt.ravel()).tofile(out / "valid.bits")
 
     # PCA false-colour view (components 1-3)
